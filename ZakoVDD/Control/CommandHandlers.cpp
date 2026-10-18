@@ -4,6 +4,7 @@
 #include "..\Adapter\GpuAdapterSelection.h"
 #include "..\Adapter\GpuStatus.h"
 #include "..\Config\DriverSettings.h"
+#include "..\Config\SettingsValidation.h"
 #include "..\Device\IndirectDeviceContextWrapper.h"
 #include "..\Diagnostics\DriverDiagnostics.h"
 #include "..\Core\DriverState.h"
@@ -27,18 +28,19 @@ namespace
 {
 void ToggleSetting(wchar_t *param, const wchar_t *settingName, const char *enableMsg, const char *disableMsg)
 {
-	if (wcsncmp(param, L"true", 4) == 0)
+	if (!param || (wcscmp(param, L"true") != 0 && wcscmp(param, L"false") != 0))
 	{
-		UpdateXmlToggleSetting(true, settingName);
-		VDD_LOG_INFO(enableMsg);
-		ReloadDriver();
+		VDD_LOG_WARNING("Setting requires true or false");
+		return;
 	}
-	else if (wcsncmp(param, L"false", 5) == 0)
+	const bool enabled = wcscmp(param, L"true") == 0;
+	if (!UpdateXmlToggleSetting(enabled, settingName))
 	{
-		UpdateXmlToggleSetting(false, settingName);
-		VDD_LOG_INFO(disableMsg);
-		ReloadDriver();
+		VDD_LOG_ERROR("Failed to save setting; driver reload cancelled");
+		return;
 	}
+	VDD_LOG_INFO(enabled ? enableMsg : disableMsg);
+	ReloadDriver();
 }
 }
 
@@ -182,17 +184,21 @@ void HandleVrrCommand(wchar_t *param)
 void HandleHardwareCursorCommand(wchar_t *param)
 {
 	bool enabled = false;
-	if (wcscmp(param, L"true") == 0)
+	if (param && wcscmp(param, L"true") == 0)
 	{
 		enabled = true;
 	}
-	else if (wcscmp(param, L"false") != 0)
+	else if (!param || wcscmp(param, L"false") != 0)
 	{
 		VDD_LOG_WARNING("HARDWARECURSOR requires true or false");
 		return;
 	}
 
-	UpdateXmlToggleSetting(enabled, L"HardwareCursor");
+	if (!UpdateXmlToggleSetting(enabled, L"HardwareCursor"))
+	{
+		VDD_LOG_ERROR("Failed to save hardware cursor setting; monitor refresh cancelled");
+		return;
+	}
 	VDD_LOG_INFO(enabled ? "Hardware Cursor Enabled" : "Hardware Cursor Disabled");
 
 	if (g_GlobalDevice == nullptr)
@@ -256,8 +262,12 @@ void HandleGetAllGpusCommand(wchar_t *)
 
 void HandleSetGpuCommand(wchar_t *param)
 {
-	wstring gpuName = param;
-	gpuName = gpuName.substr(1, gpuName.size() - 2);
+	wstring gpuName;
+	if (!VddSettings::QuotedGpu(param, gpuName))
+	{
+		VDD_LOG_ERROR("SETGPU requires a nonempty quoted GPU name");
+		return;
+	}
 
 	string gpuNameNarrow = WStringToString(gpuName);
 
@@ -268,7 +278,8 @@ void HandleSetGpuCommand(wchar_t *param)
 	}
 	else
 	{
-		VDD_LOG_ERROR("Failed to update GPU setting in XML. Restarting anyway");
+		VDD_LOG_ERROR("Failed to update GPU setting in XML; reload cancelled");
+		return;
 	}
 	ReloadDriver();
 }
@@ -277,8 +288,12 @@ void HandleSetDisplayCountCommand(wchar_t *param)
 {
 	VDD_LOG_INFO("Setting Display Count");
 
-	int newDisplayCount = 1;
-	swscanf_s(param, L"%d", &newDisplayCount);
+	int newDisplayCount = 0;
+	if (!VddSettings::DisplayCount(param, newDisplayCount))
+	{
+		VDD_LOG_ERROR("SETDISPLAYCOUNT requires an integer from 1 to 16");
+		return;
+	}
 
 	wstring displayLog = L"Setting display count  to " + to_wstring(newDisplayCount);
 	VDD_LOG_INFO(WStringToString(displayLog).c_str());
@@ -289,7 +304,8 @@ void HandleSetDisplayCountCommand(wchar_t *param)
 	}
 	else
 	{
-		VDD_LOG_ERROR("Failed to update display count setting in XML. Restarting anyway");
+		VDD_LOG_ERROR("Failed to update display count setting in XML; reload cancelled");
+		return;
 	}
 	ReloadDriver();
 }

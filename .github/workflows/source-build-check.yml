@@ -12,6 +12,7 @@ on:
       - .github/tests/test-materials.ps1
       - .github/tests/source-contract.cpp
       - .github/tests/registry-value.cpp
+      - .github/tests/settings-safety.cpp
       - .github/tests/build-tool-trust.ps1
       - .github/scripts/assert-build-tool.ps1
       - ZakoVDD/**

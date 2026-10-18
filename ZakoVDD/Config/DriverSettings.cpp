@@ -1,5 +1,6 @@
 #include "DriverSettings.h"
 #include "RegistryValue.h"
+#include "SettingsXml.h"
 
 #include "..\Core\DriverState.h"
 #include "..\Edid\Edid.h"
@@ -173,123 +174,17 @@ void loadSettings()
 			return;
 		}
 
-		XmlNodeType nodeType;
-		const WCHAR *pwszLocalName;
-		const WCHAR *pwszValue;
-		UINT cwchLocalName;
-		UINT cwchValue;
-		wstring currentElement;
-		wstring width, height, refreshRate;
-		vector<tuple<int, int, int, int>> res;
-		wstring gpuFriendlyName;
-		UINT monitorcount = 1;
-		set<tuple<int, int>> resolutions;
-		vector<float> globalRefreshRates;
-
-		while (S_OK == (hr = pReader->Read(&nodeType)))
+		VddSettings::DisplaySettings settings;
+		if (!VddSettings::ReadDisplaySettings(pReader, settings))
 		{
-			switch (nodeType)
-			{
-			case XmlNodeType_Element:
-				hr = pReader->GetLocalName(&pwszLocalName, &cwchLocalName);
-				if (FAILED(hr))
-				{
-					return;
-				}
-				currentElement = wstring(pwszLocalName, cwchLocalName);
-				break;
-			case XmlNodeType_Text:
-				hr = pReader->GetValue(&pwszValue, &cwchValue);
-				if (FAILED(hr))
-				{
-					return;
-				}
-				if (currentElement == L"count")
-				{
-					try {
-						monitorcount = stoi(wstring(pwszValue, cwchValue));
-					} catch (const exception &) {
-						monitorcount = 1;
-						VDD_LOG_WARNING("Failed to parse monitor count, defaulting to 1");
-					}
-					if (monitorcount == 0)
-					{
-						monitorcount = 1;
-						VDD_LOG_INFO("Loading singular monitor (Monitor Count is not valid)");
-					}
-				}
-				else if (currentElement == L"friendlyname")
-				{
-					gpuFriendlyName = wstring(pwszValue, cwchValue);
-				}
-				else if (currentElement == L"width")
-				{
-					width = wstring(pwszValue, cwchValue);
-					if (width.empty())
-					{
-						width = L"800";
-					}
-				}
-				else if (currentElement == L"height")
-				{
-					height = wstring(pwszValue, cwchValue);
-					if (height.empty())
-					{
-						height = L"600";
-					}
-					try {
-						resolutions.insert(make_tuple(stoi(width), stoi(height)));
-					} catch (const exception &) {
-						VDD_LOG_WARNING("Failed to parse resolution width/height, skipping");
-					}
-				}
-				else if (currentElement == L"refresh_rate")
-				{
-					refreshRate = wstring(pwszValue, cwchValue);
-					if (refreshRate.empty())
-					{
-						refreshRate = L"30";
-					}
-					try {
-						int vsync_num, vsync_den;
-						float_to_vsync(stof(refreshRate), vsync_num, vsync_den);
-						int w = stoi(width), h = stoi(height);
-						res.push_back(make_tuple(w, h, vsync_num, vsync_den));
-						VDD_LOG_DEBUG_STREAM("Added: " << w << "x" << h << " @ " << vsync_num << "/" << vsync_den << "Hz");
-					} catch (const exception &) {
-						VDD_LOG_WARNING("Failed to parse refresh rate or resolution, skipping entry");
-					}
-				}
-				else if (currentElement == L"g_refresh_rate")
-				{
-					try {
-						globalRefreshRates.push_back(stof(wstring(pwszValue, cwchValue)));
-					} catch (const exception &) {
-						VDD_LOG_WARNING("Failed to parse global refresh rate, skipping");
-					}
-				}
-				break;
-			}
+			VDD_LOG_ERROR("Loading Settings: Invalid or incomplete XML; keeping previous display configuration.");
+			return;
 		}
-
-		for (float globalRate : globalRefreshRates)
-		{
-			for (const auto &resTuple : resolutions)
-			{
-				int global_width = get<0>(resTuple);
-				int global_height = get<1>(resTuple);
-
-				int vsync_num, vsync_den;
-				float_to_vsync(globalRate, vsync_num, vsync_den);
-				res.push_back(make_tuple(global_width, global_height, vsync_num, vsync_den));
-			}
-		}
-
 		{
 			lock_guard<mutex> dataLock(g_DataMutex);
-			numVirtualDisplays = monitorcount;
-			gpuname = gpuFriendlyName;
-			monitorModes = res;
+			numVirtualDisplays = settings.count;
+			gpuname.swap(settings.gpu);
+			monitorModes.swap(settings.modes);
 		}
 		VDD_LOG_INFO("Using vdd_settings.xml");
 		return;

@@ -1,4 +1,5 @@
 #include "DriverSettings.h"
+#include "SettingsXml.h"
 
 #include "..\Core\DriverState.h"
 #include "..\Logging\Logger.h"
@@ -71,73 +72,17 @@ bool UpdateXmlElementText(const wchar_t *targetElement, const wchar_t *replaceme
 		return false;
 	}
 
-	XmlNodeType nodeType;
-	const wchar_t *pwszLocalName = nullptr;
-	const wchar_t *pwszValue = nullptr;
-	bool targetElementFound = false;
-
-	while (S_OK == pReader->Read(&nodeType))
+	if (!VddSettings::ReplaceElementText(pReader, pWriter, targetElement, replacementText) ||
+		FAILED(pOutFileStream->Commit(STGC_DEFAULT)))
 	{
-		switch (nodeType)
-		{
-		case XmlNodeType_Element:
-			if (FAILED(pReader->GetLocalName(&pwszLocalName, nullptr)) || pwszLocalName == nullptr)
-			{
-				return false;
-			}
-			pWriter->WriteStartElement(nullptr, pwszLocalName, nullptr);
-			targetElementFound = (wcscmp(pwszLocalName, targetElement) == 0);
-			break;
-
-		case XmlNodeType_EndElement:
-			pWriter->WriteEndElement();
-			targetElementFound = false;
-			break;
-
-		case XmlNodeType_Text:
-			if (FAILED(pReader->GetValue(&pwszValue, nullptr)) || pwszValue == nullptr)
-			{
-				return false;
-			}
-			if (targetElementFound)
-			{
-				pWriter->WriteString(replacementText);
-				targetElementFound = false;
-			}
-			else
-			{
-				pWriter->WriteString(pwszValue);
-			}
-			break;
-
-		case XmlNodeType_Whitespace:
-			if (FAILED(pReader->GetValue(&pwszValue, nullptr)) || pwszValue == nullptr)
-			{
-				return false;
-			}
-			pWriter->WriteWhitespace(pwszValue);
-			break;
-
-		case XmlNodeType_Comment:
-			if (FAILED(pReader->GetValue(&pwszValue, nullptr)) || pwszValue == nullptr)
-			{
-				return false;
-			}
-			pWriter->WriteComment(pwszValue);
-			break;
-		}
-	}
-
-	hr = pWriter->WriteEndDocument();
-	if (FAILED(hr))
-	{
+		VDD_LOG_ERROR("UpdatingXML: Incomplete read/write or setting not found; original file preserved.");
 		return false;
 	}
 
-	pFileStream.Release();
-	pOutFileStream.Release();
 	pWriter.Release();
 	pReader.Release();
+	pOutFileStream.Release();
+	pFileStream.Release();
 
 	if (!MoveFileExW(tempFileName.c_str(), settingsname.c_str(), MOVEFILE_REPLACE_EXISTING))
 	{
@@ -155,7 +100,7 @@ bool UpdateXmlToggleSetting(bool toggle, const wchar_t *variable)
 
 bool UpdateXmlGpuSetting(const wchar_t *gpuName)
 {
-	return UpdateXmlElementText(L"gpu", gpuName);
+	return UpdateXmlElementText(L"friendlyname", gpuName);
 }
 
 bool UpdateXmlDisplayCountSetting(int displayCount)
