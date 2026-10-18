@@ -7,6 +7,8 @@ on:
     paths:
       - .github/workflows/source-build-check.yml
       - .github/scripts/source-build-wdk.ps1
+      - .github/scripts/source-contract-check.cmd
+      - .github/tests/source-contract.cpp
 
 permissions:
   contents: read
@@ -16,8 +18,20 @@ env:
 
 jobs:
   build:
+    name: Source build ${{ matrix.tag }}
     runs-on: windows-2022
     timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - tag: v0.17.5
+            source_commit: 88d117431549bcba22fea27ded3d4804c79b51fb
+          - tag: v0.18.0
+            source_commit: 22b15167bec5b9ec9ae76e75cbc697704965ab08
+    env:
+      SOURCE_TAG: ${{ matrix.tag }}
+      SOURCE_COMMIT: ${{ matrix.source_commit }}
     steps:
       - name: Checkout experiment workflow
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -25,11 +39,11 @@ jobs:
           path: experiment
           persist-credentials: false
 
-      - name: Checkout unchanged official v0.18.0
+      - name: Checkout unchanged official source
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           repository: qiin2333/zako-vdd
-          ref: 22b15167bec5b9ec9ae76e75cbc697704965ab08
+          ref: ${{ matrix.source_commit }}
           path: source
           persist-credentials: false
 
@@ -40,11 +54,11 @@ jobs:
           New-Item -ItemType Directory evidence | Out-Null
           $source = (git -C source rev-parse HEAD).Trim()
           $workflow = (git -C experiment rev-parse HEAD).Trim()
-          if ($source -ne '22b15167bec5b9ec9ae76e75cbc697704965ab08') { throw 'Unexpected source commit' }
+          if ($source -ne $env:SOURCE_COMMIT) { throw 'Unexpected source commit' }
           if ($workflow -ne $env:GITHUB_SHA) { throw 'Unexpected workflow commit' }
           [ordered]@{
             repository = 'https://github.com/qiin2333/zako-vdd'
-            tag = 'v0.18.0'
+            tag = $env:SOURCE_TAG
             source_commit = $source
             workflow_commit = $workflow
             run_url = "$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"
@@ -59,6 +73,13 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Initial source status failed' }
           [IO.File]::WriteAllText((Join-Path $PWD 'evidence/source-before.txt'), ($before -join "`n"))
           if ($before.Count -gt 0) { throw 'Official source checkout is dirty before build' }
+          $contracts = @('Common/Include/vdd_control_ioctl.h', 'Common/Include/vdd_cursor_shared.h',
+            'ZakoVDD/Control/CommandDispatcher.cpp', 'ZakoVDD/Control/CommandHandlers.cpp',
+            'ZakoVDD/Control/ControlTransport.cpp', 'ZakoVDD/Rendering/SharedFrameExporter.cpp',
+            'ZakoVDD/Rendering/CursorExporter.cpp', 'ZakoVDD/ZakoVDD.vcxproj', 'ZakoVDD/ZakoVDD.inf')
+          $contracts | ForEach-Object {
+            [ordered]@{ path = $_; sha256 = (Get-FileHash "source/$_" -Algorithm SHA256).Hash }
+          } | ConvertTo-Json -AsArray | Set-Content evidence/source-contract-sha256.json
 
       - name: Setup VS2022 MSBuild
         uses: microsoft/setup-msbuild@6fb02220983dee41ce7ae257b6f4d8f9bf5ed4ce # v2
@@ -86,8 +107,17 @@ jobs:
         shell: pwsh
         working-directory: source
         run: |
+          if (-not (Test-Path tools/edid_test/build_consumer.bat)) {
+            if ($env:SOURCE_TAG -ne 'v0.17.5') { throw 'Expected upstream EDID test entry point missing' }
+            'Not available in the pinned v0.17.5 source; common offline EDID checks run separately.' | Set-Content ../evidence/edid-test.log
+            exit 0
+          }
           & cmd /d /c 'call tools\edid_test\build_consumer.bat' 2>&1 | Tee-Object ../evidence/edid-test.log
           exit $LASTEXITCODE
+
+      - name: Check common contracts and inspect built PE offline
+        shell: cmd
+        run: call experiment\.github\scripts\source-contract-check.cmd "%GITHUB_WORKSPACE%\source" "%GITHUB_WORKSPACE%\evidence"
 
       # WDK tasks may log an error while MSBuild still returns zero. Preserve
       # successful DLL/EDID evidence, but do not label that run fully verified.
@@ -124,7 +154,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: zako-vdd-v0.18.0-unsigned-source-build
+          name: zako-vdd-${{ matrix.tag }}-unsigned-source-build
           retention-days: 14
           if-no-files-found: error
           path: |
