@@ -1,0 +1,116 @@
+name: Unsigned official VDD source build check
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [codex/vdd-source-build]
+    paths:
+      - .github/workflows/source-build-check.yml
+      - .github/scripts/source-build-wdk.ps1
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 40
+    steps:
+      - name: Checkout experiment workflow
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          path: experiment
+          persist-credentials: false
+
+      - name: Checkout unchanged official v0.18.0
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: qiin2333/zako-vdd
+          ref: 22b15167bec5b9ec9ae76e75cbc697704965ab08
+          path: source
+          persist-credentials: false
+
+      - name: Record source and workflow identity
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory evidence | Out-Null
+          $source = (git -C source rev-parse HEAD).Trim()
+          $workflow = (git -C experiment rev-parse HEAD).Trim()
+          if ($source -ne '22b15167bec5b9ec9ae76e75cbc697704965ab08') { throw 'Unexpected source commit' }
+          if ($workflow -ne $env:GITHUB_SHA) { throw 'Unexpected workflow commit' }
+          [ordered]@{
+            repository = 'https://github.com/qiin2333/zako-vdd'
+            tag = 'v0.18.0'
+            source_commit = $source
+            workflow_commit = $workflow
+            run_url = "$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"
+            runner_image = $env:ImageOS
+            runner_image_version = $env:ImageVersion
+            runner_os = [Environment]::OSVersion.VersionString
+            configuration = 'Release'
+            platform = 'x64'
+            signing = 'Off; experimental outputs only'
+          } | ConvertTo-Json | Set-Content evidence/source.json
+          git -C source status --porcelain --untracked-files=no | Set-Content evidence/source-before.txt
+
+      - name: Setup VS2022 MSBuild
+        uses: microsoft/setup-msbuild@6fb02220983dee41ce7ae257b6f4d8f9bf5ed4ce # v2
+        with:
+          vs-version: '[17.0,18.0)'
+
+      - name: Prepare and verify WDK integration
+        shell: pwsh
+        run: ./experiment/.github/scripts/source-build-wdk.ps1
+
+      - name: Compile unchanged driver without signing
+        shell: pwsh
+        working-directory: source
+        run: |
+          & msbuild ZakoVDD.sln /m /p:Configuration=Release /p:Platform=x64 /p:SignMode=Off /bl:../evidence/vdd.binlog /fl '/flp:logfile=../evidence/vdd-build.log;verbosity=diagnostic'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          foreach ($name in @('ZakoVDD.dll', 'ZakoVDD.inf', 'vdd_settings.xml')) {
+            if (-not (Test-Path -LiteralPath "x64/Release/ZakoVDD/$name")) { throw "Missing output: $name" }
+          }
+
+      - name: Build and run upstream EDID profile tests
+        shell: pwsh
+        working-directory: source
+        run: |
+          & cmd /d /c 'call tools\edid_test\build_consumer.bat' 2>&1 | Tee-Object ../evidence/edid-test.log
+          exit $LASTEXITCODE
+
+      - name: Preserve output hashes and final source integrity
+        if: always()
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (-not (Test-Path evidence)) { New-Item -ItemType Directory evidence | Out-Null }
+          if (-not (Test-Path source/.git)) { throw 'Source checkout unavailable for integrity check' }
+          $changes = @(git -C source status --porcelain --untracked-files=no)
+          if ($LASTEXITCODE -ne 0) { throw 'Source status failed' }
+          [IO.File]::WriteAllText((Join-Path $PWD 'evidence/source-after.txt'), ($changes -join "`n"))
+          git -C source diff --binary HEAD | Set-Content evidence/source.diff
+          $outputs = @(Get-ChildItem source/x64/Release/ZakoVDD -File -ErrorAction SilentlyContinue)
+          $outputs | ForEach-Object {
+            [ordered]@{ path = $_.Name; bytes = $_.Length; sha256 = (Get-FileHash $_.FullName -Algorithm SHA256).Hash }
+          } | ConvertTo-Json -AsArray | Set-Content evidence/output-sha256.json
+          if ($changes.Count -gt 0) { throw 'Tracked official source changed during build or tests' }
+
+      - name: Upload evidence and experimental outputs
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: zako-vdd-v0.18.0-unsigned-source-build
+          retention-days: 14
+          if-no-files-found: error
+          path: |
+            evidence/
+            source/LICENSE
+            source/x64/Release/ZakoVDD/ZakoVDD.dll
+            source/x64/Release/ZakoVDD/ZakoVDD.inf
+            source/x64/Release/ZakoVDD/zakovdd.cat
+            source/x64/Release/ZakoVDD/vdd_settings.xml
