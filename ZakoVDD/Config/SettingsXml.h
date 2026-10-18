@@ -38,7 +38,7 @@ inline bool ReadDisplaySettings(IXmlReader* reader, DisplaySettings& output)
         if (type == XmlNodeType_Element)
         {
             if (needsValue) return false;
-            if (FAILED(reader->GetLocalName(&text, &length))) return false;
+            if (FAILED(reader->GetLocalName(&text, &length)) || !text) return false;
             element.assign(text, length);
             if (element == L"resolution")
             {
@@ -53,7 +53,7 @@ inline bool ReadDisplaySettings(IXmlReader* reader, DisplaySettings& output)
         else if (type == XmlNodeType_EndElement)
         {
             if (needsValue) return false;
-            if (FAILED(reader->GetLocalName(&text, &length))) return false;
+            if (FAILED(reader->GetLocalName(&text, &length)) || !text) return false;
             if (std::wstring(text, length) == L"resolution")
             {
                 if (width <= 0 || height <= 0) return false;
@@ -63,7 +63,7 @@ inline bool ReadDisplaySettings(IXmlReader* reader, DisplaySettings& output)
         }
         else if (type == XmlNodeType_Text || type == XmlNodeType_CDATA)
         {
-            if (FAILED(reader->GetValue(&text, &length))) return false;
+            if (FAILED(reader->GetValue(&text, &length)) || !text) return false;
             const std::wstring value(text, length);
             needsValue = false;
             if (element == L"count")
@@ -125,7 +125,7 @@ inline bool ReplaceElementText(IXmlReader* reader, IXmlWriter* writer,
         {
             if (inTarget) return false;
             const wchar_t* name = nullptr;
-            if (FAILED(reader->GetLocalName(&name, nullptr))) return false;
+            if (FAILED(reader->GetLocalName(&name, nullptr)) || !name) return false;
             if (wcscmp(name, target) == 0)
             {
                 if (FAILED(writer->WriteStartElement(nullptr, name, nullptr)) ||
