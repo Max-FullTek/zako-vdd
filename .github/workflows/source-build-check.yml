@@ -64,6 +64,9 @@ jobs:
         uses: microsoft/setup-msbuild@6fb02220983dee41ce7ae257b6f4d8f9bf5ed4ce # v2
         with:
           vs-version: '[17.0,18.0)'
+          # Platform=x64 controls the driver output, not the MSBuild host.
+          # WDK's in-process package verifier needs the matching native DLL.
+          msbuild-architecture: x64
 
       - name: Prepare and verify WDK integration
         shell: pwsh

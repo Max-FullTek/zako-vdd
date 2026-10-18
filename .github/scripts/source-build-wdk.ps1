@@ -29,6 +29,19 @@ try {
         Set-Content "$evidence/visual-studio.json"
     $vs = & $vswhere -products '*' -requires Microsoft.Component.MSBuild -version '[17.0,18.0)' -property installationPath -latest
     if (-not $vs) { throw 'VS2022 MSBuild installation missing' }
+    $msbuild = (Get-Command msbuild -CommandType Application -ErrorAction Stop).Source
+    $expectedMsbuild = Join-Path $vs 'MSBuild/Current/Bin/amd64/MSBuild.exe'
+    if ($msbuild -ne $expectedMsbuild) { throw "Expected x64 MSBuild at $expectedMsbuild; resolved $msbuild" }
+    [ordered]@{
+        path = $msbuild
+        architecture = 'x64'
+        file_version = (Get-Item -LiteralPath $msbuild).VersionInfo.FileVersion
+        sha256 = (Get-FileHash -LiteralPath $msbuild -Algorithm SHA256).Hash
+    } | ConvertTo-Json | Set-Content "$evidence/msbuild-host.json"
+    Write-Host "Using x64 MSBuild: $msbuild"
+    Get-ChildItem 'C:\Program Files*\Windows Kits\10\build\*\bin\*\InfVerif.dll', 'C:\Program Files*\Windows Kits\10\build\bin\*\InfVerif.dll' -File -ErrorAction SilentlyContinue |
+        Select-Object FullName, @{n='FileVersion';e={$_.VersionInfo.FileVersion}} |
+        ConvertTo-Json -AsArray | Set-Content "$evidence/infverif-libraries.json"
     & msbuild -version | Set-Content "$evidence/msbuild.txt"
 
     if (-not (Test-WdkIntegration 'initial')) {
