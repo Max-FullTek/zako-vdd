@@ -1,4 +1,4 @@
-name: Unsigned official VDD source build check
+name: Unsigned VDD baseline and hardened build check
 
 on:
   workflow_dispatch:
@@ -11,6 +11,12 @@ on:
       - .github/scripts/prepare-vdd-test-materials.ps1
       - .github/tests/test-materials.ps1
       - .github/tests/source-contract.cpp
+      - .github/tests/registry-value.cpp
+      - .github/tests/build-tool-trust.ps1
+      - .github/scripts/assert-build-tool.ps1
+      - ZakoVDD/**
+      - Common/**
+      - vdd_settings.xml
 
 permissions:
   contents: read
@@ -29,8 +35,13 @@ jobs:
         include:
           - tag: v0.17.5
             source_commit: 88d117431549bcba22fea27ded3d4804c79b51fb
+            repository: qiin2333/zako-vdd
           - tag: v0.18.0
             source_commit: 22b15167bec5b9ec9ae76e75cbc697704965ab08
+            repository: qiin2333/zako-vdd
+          - tag: v0.18.0-hardened
+            source_commit: ${{ github.sha }}
+            repository: ${{ github.repository }}
     env:
       SOURCE_TAG: ${{ matrix.tag }}
       SOURCE_COMMIT: ${{ matrix.source_commit }}
@@ -41,13 +52,14 @@ jobs:
           path: experiment
           persist-credentials: false
 
-      - name: Checkout unchanged official source
+      - name: Checkout pinned build source
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          repository: qiin2333/zako-vdd
+          repository: ${{ matrix.repository }}
           ref: ${{ matrix.source_commit }}
           path: source
           persist-credentials: false
+          fetch-depth: 0
 
       - name: Record source and workflow identity
         shell: pwsh
@@ -58,10 +70,17 @@ jobs:
           $workflow = (git -C experiment rev-parse HEAD).Trim()
           if ($source -ne $env:SOURCE_COMMIT) { throw 'Unexpected source commit' }
           if ($workflow -ne $env:GITHUB_SHA) { throw 'Unexpected workflow commit' }
+          $base = if ($env:SOURCE_TAG -eq 'v0.18.0-hardened') { '22b15167bec5b9ec9ae76e75cbc697704965ab08' } else { $source }
+          if ($env:SOURCE_TAG -eq 'v0.18.0-hardened') {
+            git -C source merge-base --is-ancestor $base HEAD
+            if ($LASTEXITCODE -ne 0) { throw 'Fork is not based on reviewed v0.18 source' }
+            git -C source diff $base HEAD -- ZakoVDD Common vdd_settings.xml | Set-Content evidence/fork.diff
+          }
           [ordered]@{
-            repository = 'https://github.com/qiin2333/zako-vdd'
+            repository = 'https://github.com/${{ matrix.repository }}'
             tag = $env:SOURCE_TAG
             source_commit = $source
+            upstream_base_commit = $base
             workflow_commit = $workflow
             run_url = "$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"
             runner_image = $env:ImageOS
@@ -95,7 +114,7 @@ jobs:
         shell: pwsh
         run: ./experiment/.github/scripts/source-build-wdk.ps1
 
-      - name: Compile unchanged driver without signing
+      - name: Compile pinned driver without signing
         shell: pwsh
         working-directory: source
         run: |
@@ -120,6 +139,11 @@ jobs:
       - name: Check common contracts and inspect built PE offline
         shell: cmd
         run: call experiment\.github\scripts\source-contract-check.cmd "%GITHUB_WORKSPACE%\source" "%GITHUB_WORKSPACE%\evidence"
+
+      - name: Test tool trust rejection paths offline
+        if: matrix.tag == 'v0.18.0-hardened'
+        shell: pwsh
+        run: ./experiment/.github/tests/build-tool-trust.ps1
 
       # WDK tasks may log an error while MSBuild still returns zero. Preserve
       # successful DLL/EDID evidence, but do not label that run fully verified.
@@ -153,7 +177,7 @@ jobs:
           if ($changes.Count -gt 0) { throw 'Tracked official source changed during build or tests' }
 
       - name: Prepare unsigned baseline materials for later signing review
-        if: success() && matrix.tag == 'v0.17.5'
+        if: success() && (matrix.tag == 'v0.17.5' || matrix.tag == 'v0.18.0-hardened')
         shell: pwsh
         run: |
           ./experiment/.github/scripts/prepare-vdd-test-materials.ps1 -BuildDirectory source/x64/Release/ZakoVDD -LicensePath source/LICENSE -EvidenceDirectory evidence -OutputDirectory "$env:GITHUB_WORKSPACE/test-materials"

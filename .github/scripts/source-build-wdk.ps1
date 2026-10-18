@@ -1,5 +1,6 @@
 # Runs only on the disposable hosted Windows runner; never installs a driver.
 $ErrorActionPreference = 'Stop'
+. "$PSScriptRoot/assert-build-tool.ps1"
 $evidence = Join-Path $env:GITHUB_WORKSPACE 'evidence'
 $sourceProject = Join-Path $env:GITHUB_WORKSPACE 'source/ZakoVDD/ZakoVDD.vcxproj'
 $taskPattern = 'C:\Program Files*\Windows Kits\10\build\*\bin\Microsoft.DriverKit.Build.Tasks.17.0.dll'
@@ -51,8 +52,12 @@ try {
         $tasks = @(Get-ChildItem $taskPattern -ErrorAction SilentlyContinue)
         if (-not ($headers.Count -gt 0 -and $tasks.Count -gt 0)) {
             $installer = Join-Path $env:RUNNER_TEMP 'zako-wdksetup.exe'
-            Invoke-WebRequest 'https://go.microsoft.com/fwlink/?linkid=2272234' -OutFile $installer
-            Get-FileHash $installer -Algorithm SHA256 | Format-List | Out-File "$evidence/wdk-installer.txt"
+            # Reviewed 10.1.26100.1 bootstrapper. Updating this pin requires review;
+            # never silently accept a replacement behind Microsoft's fwlink.
+            $installerUrl = 'https://download.microsoft.com/download/2/5/f/25f22c34-1cc4-404c-9f92-2ff26cc4ac91/KIT_BUNDLE_WDK_MEDIACREATION/wdksetup.exe'
+            Invoke-WebRequest $installerUrl -OutFile $installer
+            Assert-TrustedBuildTool -Path $installer -ExpectedSha256 '01C341C97A7CAE10E5DB19CD1311C3638F15B9F577D19C4F03DF909A2B1D70F8' |
+                ConvertTo-Json | Set-Content "$evidence/wdk-installer.json"
             $process = Start-Process $installer -ArgumentList '/quiet', '/norestart', '/features', '+' -Wait -PassThru -WindowStyle Hidden
             $process.ExitCode | Set-Content "$evidence/wdk-setup-exit.txt"
             # Check actual integration again even when setup reports a nonzero code.

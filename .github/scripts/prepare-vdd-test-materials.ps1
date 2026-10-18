@@ -1,10 +1,10 @@
 <#
 .SYNOPSIS
-Prepares or verifies offline v0.17.5 signing materials. Never installs or signs.
+Prepares or verifies minimal offline baseline/fork signing materials. Never installs or signs.
 .DESCRIPTION
-The output deliberately has no catalog or certificate. Its INF keeps the official
-baseline date/version; build identity lives in manifest.json. This is not a fork
-release version or an automatic upgrade policy. Resolve OS-specific packaging,
+The output deliberately has no catalog or certificate. Its INF uses a fixed test
+date/version; exact build identity lives in manifest.json. This is not an automatic
+release or upgrade policy. Resolve OS-specific packaging,
 signing, trust, backup and device switching before using it on a test machine.
 #>
 [CmdletBinding(DefaultParameterSetName = 'Prepare')]
@@ -19,13 +19,36 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $OutputDirectory = [IO.Path]::GetFullPath($OutputDirectory)
 
+function Get-MaterialIdentity {
+    param($Source)
+    if ($Source.tag -eq 'v0.17.5' -and
+        $Source.source_commit -eq '88d117431549bcba22fea27ded3d4804c79b51fb' -and
+        $Source.repository -eq 'https://github.com/qiin2333/zako-vdd') {
+        return @{ date = '09/07/2026'; version = '100.0.17.5' }
+    }
+    if ($Source.tag -eq 'v0.18.0-hardened' -and
+        $Source.repository -eq 'https://github.com/Max-FullTek/zako-vdd' -and
+        $Source.source_commit -match '^[0-9a-f]{40}$' -and
+        $Source.source_commit -eq $Source.workflow_commit -and
+        $Source.upstream_base_commit -eq '22b15167bec5b9ec9ae76e75cbc697704965ab08') {
+        return @{ date = '10/19/2026'; version = '100.0.18.0' }
+    }
+    throw 'Only the pinned baseline or reviewed v0.18.0 fork build is accepted'
+}
+
 function Assert-Materials {
     param([string]$Directory)
     $manifest = Get-Content -LiteralPath (Join-Path $Directory 'manifest.json') -Raw | ConvertFrom-Json
     if ($manifest.schema -ne 1 -or $manifest.state -ne 'unsigned-materials-only' -or
-        $manifest.install_ready -ne $false -or $manifest.signing_complete -ne $false -or
-        $manifest.source_commit -ne '88d117431549bcba22fea27ded3d4804c79b51fb' -or
-        $manifest.driver_version -ne '100.0.17.5' -or $manifest.driver_date -ne '09/07/2026') {
+        $manifest.install_ready -ne $false -or $manifest.signing_complete -ne $false) {
+        throw 'Unexpected material identity or readiness claim'
+    }
+    $source = Get-Content -LiteralPath (Join-Path $Directory 'provenance/source.json') -Raw | ConvertFrom-Json
+    $identity = Get-MaterialIdentity $source
+    if ($manifest.source_tag -cne $source.tag -or $manifest.source_commit -cne $source.source_commit -or
+        $manifest.build_workflow_commit -cne $source.workflow_commit -or
+        $manifest.driver_version -cne $identity.version -or $manifest.driver_date -cne $identity.date -or
+        $source.configuration -ne 'Release' -or $source.platform -ne 'x64') {
         throw 'Unexpected material identity or readiness claim'
     }
     $expected = @('LICENSE', 'ZakoVDD.dll', 'ZakoVDD.inf', 'vdd_settings.xml',
@@ -43,7 +66,8 @@ function Assert-Materials {
     $actual = @(Get-ChildItem -LiteralPath $Directory -Recurse -File)
     if ($actual.Count -ne ($expected.Count + 1)) { throw 'Unexpected extra files in unsigned materials' }
     $inf = Get-Content -LiteralPath (Join-Path $Directory 'ZakoVDD.inf') -Raw
-    if (@([regex]::Matches($inf, '(?m)^DriverVer=09/07/2026,100\.0\.17\.5\r?$')).Count -ne 1) {
+    $directive = [regex]::Escape("DriverVer=$($identity.date),$($identity.version)")
+    if (@([regex]::Matches($inf, "(?m)^$directive`r?$" )).Count -ne 1) {
         throw 'Fixed baseline INF version missing'
     }
     Write-Host 'Offline hashes and baseline identity verified; materials remain unsigned and not install-ready.'
@@ -55,11 +79,10 @@ if ($VerifyOnly) {
 }
 if (Test-Path -LiteralPath $OutputDirectory) { throw 'Output directory must not exist; refusing to overwrite' }
 $source = Get-Content -LiteralPath (Join-Path $EvidenceDirectory 'source.json') -Raw | ConvertFrom-Json
-if ($source.tag -ne 'v0.17.5' -or $source.source_commit -ne '88d117431549bcba22fea27ded3d4804c79b51fb' -or
-    $source.configuration -ne 'Release' -or $source.platform -ne 'x64' -or
-    $source.repository -ne 'https://github.com/qiin2333/zako-vdd' -or
+$identity = Get-MaterialIdentity $source
+if ($source.configuration -ne 'Release' -or $source.platform -ne 'x64' -or
     $source.workflow_commit -notmatch '^[0-9a-f]{40}$') {
-    throw 'Only the pinned v0.17.5 Release x64 baseline is accepted'
+    throw 'Only Release x64 builds with a recorded workflow commit are accepted'
 }
 $hashes = @(Get-Content -LiteralPath (Join-Path $EvidenceDirectory 'output-sha256.json') -Raw | ConvertFrom-Json)
 foreach ($name in @('ZakoVDD.dll', 'ZakoVDD.inf', 'vdd_settings.xml')) {
@@ -86,7 +109,7 @@ foreach ($name in @('source.json', 'output-sha256.json', 'source-contract-sha256
 }
 # Only the copied INF is stamped. No catalog is copied: INF changes invalidate it,
 # and any later embedded DLL signature must precede catalog generation/signing.
-$infText = [regex]::Replace($infText, '(?m)^DriverVer\s*=[^\r\n]*', 'DriverVer=09/07/2026,100.0.17.5')
+$infText = [regex]::Replace($infText, '(?m)^DriverVer\s*=[^\r\n]*', "DriverVer=$($identity.date),$($identity.version)")
 [IO.File]::WriteAllText((Join-Path $OutputDirectory 'ZakoVDD.inf'), $infText, [Text.Encoding]::ASCII)
 $files = @(Get-ChildItem -LiteralPath $OutputDirectory -Recurse -File | Sort-Object FullName | ForEach-Object {
     [ordered]@{ path = [IO.Path]::GetRelativePath([IO.Path]::GetFullPath($OutputDirectory), $_.FullName).Replace('\', '/')
@@ -101,9 +124,10 @@ $files = @(Get-ChildItem -LiteralPath $OutputDirectory -Recurse -File | Sort-Obj
     source_commit = $source.source_commit
     build_workflow_commit = $source.workflow_commit
     preparation_workflow_commit = $env:GITHUB_SHA
-    driver_date = '09/07/2026'
-    driver_version = '100.0.17.5'
-    version_policy = 'Official baseline identity for offline test preparation only; fork release/upgrade policy undecided.'
+    driver_date = $identity.date
+    driver_version = $identity.version
+    version_policy = 'Fixed test identity; exact source/workflow commits identify the build. No automatic upgrade or release.'
+    package_policy = 'Minimal Windows VDD only: no Vulkan bridge, probe, layer registration or certificate bundled.'
     inf_change = 'DriverVer only; original input hash retained in provenance/output-sha256.json.'
     device_policy = 'Retains Root\ZakoVDD and shared interfaces; controlled replacement only, no independent coexistence.'
     pending = @(

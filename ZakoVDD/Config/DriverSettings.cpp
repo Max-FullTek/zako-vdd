@@ -1,4 +1,5 @@
 #include "DriverSettings.h"
+#include "RegistryValue.h"
 
 #include "..\Core\DriverState.h"
 #include "..\Edid\Edid.h"
@@ -64,8 +65,6 @@ bool initpath()
 
 	// Fall back to the installer-written registry path.
 	HKEY hKey;
-	wchar_t szPath[MAX_PATH] = {0};
-	DWORD dwBufferSize = sizeof(szPath);
 	LONG lResult;
 	lResult = RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"SOFTWARE\\ZakoTech\\ZakoDisplayAdapter", 0, KEY_READ, &hKey);
 	if (lResult != ERROR_SUCCESS)
@@ -74,17 +73,9 @@ bool initpath()
 		return false;
 	}
 
-	lResult = RegQueryValueExW(hKey, L"VDDPATH", NULL, NULL, (LPBYTE)szPath, &dwBufferSize);
-	if (lResult != ERROR_SUCCESS)
-	{
-		RegCloseKey(hKey);
-		return false;
-	}
-
-	confpath = szPath;
+	const bool success = VddRegistry::ReadString(hKey, L"VDDPATH", confpath);
 	RegCloseKey(hKey);
-
-	return true;
+	return success;
 }
 
 // Keep the in-memory runtime knobs in sync with registry/XML settings.

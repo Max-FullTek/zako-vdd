@@ -1,4 +1,5 @@
 #include "DriverSettings.h"
+#include "RegistryValue.h"
 
 #include "..\Core\DriverState.h"
 #include "..\Logging\Logger.h"
@@ -71,7 +72,6 @@ void LogQueries(VddLogLevel severity, const wstring &xmlName)
 bool TryReadRegistryDword(const wstring &regName, DWORD &value)
 {
 	HKEY hKey = nullptr;
-	DWORD bufferSize = sizeof(value);
 
 	LONG result = RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"SOFTWARE\\ZakoTech\\ZakoDisplayAdapter", 0, KEY_READ, &hKey);
 	if (result != ERROR_SUCCESS)
@@ -79,16 +79,14 @@ bool TryReadRegistryDword(const wstring &regName, DWORD &value)
 		return false;
 	}
 
-	result = RegQueryValueExW(hKey, regName.c_str(), nullptr, nullptr, reinterpret_cast<LPBYTE>(&value), &bufferSize);
+	const bool success = VddRegistry::ReadDword(hKey, regName.c_str(), value);
 	RegCloseKey(hKey);
-	return result == ERROR_SUCCESS;
+	return success;
 }
 
 bool TryReadRegistryString(const wstring &regName, wstring &value)
 {
 	HKEY hKey = nullptr;
-	wchar_t buffer[MAX_PATH] = {};
-	DWORD bufferSize = sizeof(buffer);
 
 	LONG result = RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"SOFTWARE\\ZakoTech\\ZakoDisplayAdapter", 0, KEY_READ, &hKey);
 	if (result != ERROR_SUCCESS)
@@ -96,15 +94,9 @@ bool TryReadRegistryString(const wstring &regName, wstring &value)
 		return false;
 	}
 
-	result = RegQueryValueExW(hKey, regName.c_str(), nullptr, nullptr, reinterpret_cast<LPBYTE>(buffer), &bufferSize);
+	const bool success = VddRegistry::ReadString(hKey, regName.c_str(), value);
 	RegCloseKey(hKey);
-	if (result != ERROR_SUCCESS)
-	{
-		return false;
-	}
-
-	value = buffer;
-	return true;
+	return success;
 }
 
 bool TryReadXmlText(const wstring &xmlName, wstring &value)
