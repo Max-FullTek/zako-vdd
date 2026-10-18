@@ -2,6 +2,8 @@
 
 #include "SettingsValidation.h"
 #include "../Util/RefreshRate.h"
+#include <windows.h>
+#include <objbase.h>
 #include <xmllite.h>
 #include <set>
 #include <tuple>
