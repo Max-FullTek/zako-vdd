@@ -5,8 +5,6 @@
 
 #include <AdapterOption.h>
 #include <algorithm>
-#include <fstream>
-#include <sstream>
 #include <vector>
 
 using namespace std;
@@ -48,19 +46,6 @@ bool SameGpuName(const wstring &left, const wstring &right)
 static bool HasExplicitGpuPreference(const wstring &gpuName)
 {
 	return !gpuName.empty() && !SameGpuName(gpuName, L"default");
-}
-
-wstring ReadAdapterPreferenceFile(const wstring &path)
-{
-	ifstream ifs{path.c_str()};
-	if (!ifs.is_open())
-	{
-		return L"";
-	}
-
-	string line;
-	getline(ifs, line);
-	return wstring(line.begin(), line.end());
 }
 
 static string FormatAdapterLogName(const wstring &adapterName, const LUID &adapterLuid)
