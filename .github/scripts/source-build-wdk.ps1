@@ -3,11 +3,12 @@ $ErrorActionPreference = 'Stop'
 $evidence = Join-Path $env:GITHUB_WORKSPACE 'evidence'
 $sourceProject = Join-Path $env:GITHUB_WORKSPACE 'source/ZakoVDD/ZakoVDD.vcxproj'
 $taskPattern = 'C:\Program Files*\Windows Kits\10\build\*\bin\Microsoft.DriverKit.Build.Tasks.17.0.dll'
-$headerPattern = 'C:\Program Files*\Windows Kits\10\Include\*\wdf'
+# The installed WDK imports use Include\wdf\umdf, outside versioned SDK folders.
+$headerPattern = 'C:\Program Files*\Windows Kits\10\Include\wdf\umdf\*\wdf.h'
 
 function Test-WdkIntegration {
     param([string]$Label)
-    $headers = @(Get-ChildItem $headerPattern -Directory -ErrorAction SilentlyContinue)
+    $headers = @(Get-ChildItem $headerPattern -File -ErrorAction SilentlyContinue)
     $tasks = @(Get-ChildItem $taskPattern -ErrorAction SilentlyContinue)
     $headers.FullName | Set-Content "$evidence/headers-$Label.txt"
     $tasks | Select-Object FullName, @{n='FileVersion';e={$_.VersionInfo.FileVersion}} |
@@ -31,7 +32,7 @@ try {
     & msbuild -version | Set-Content "$evidence/msbuild.txt"
 
     if (-not (Test-WdkIntegration 'initial')) {
-        $headers = @(Get-ChildItem $headerPattern -Directory -ErrorAction SilentlyContinue)
+        $headers = @(Get-ChildItem $headerPattern -File -ErrorAction SilentlyContinue)
         $tasks = @(Get-ChildItem $taskPattern -ErrorAction SilentlyContinue)
         if (-not ($headers.Count -gt 0 -and $tasks.Count -gt 0)) {
             $installer = Join-Path $env:RUNNER_TEMP 'zako-wdksetup.exe'
