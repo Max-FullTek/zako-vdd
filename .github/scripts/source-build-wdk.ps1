@@ -29,6 +29,8 @@ try {
         Set-Content "$evidence/visual-studio.json"
     $vs = & $vswhere -products '*' -requires Microsoft.Component.MSBuild -version '[17.0,18.0)' -property installationPath -latest
     if (-not $vs) { throw 'VS2022 MSBuild installation missing' }
+    # Reuse the resolved path in the later cmd step without nested for/f quoting.
+    "VDD_VSINSTALL=$vs" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
     $msbuild = (Get-Command msbuild -CommandType Application -ErrorAction Stop).Source
     $expectedMsbuild = Join-Path $vs 'MSBuild/Current/Bin/amd64/MSBuild.exe'
     if ($msbuild -ne $expectedMsbuild) { throw "Expected x64 MSBuild at $expectedMsbuild; resolved $msbuild" }
