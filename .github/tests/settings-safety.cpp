@@ -5,6 +5,33 @@
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
+#include "../Control/CommandDispatcher.h"
+#include "../Control/CommandHandlers.h"
+
+std::string action;
+std::wstring argument;
+#define FAKE_ACTION(name) void name(wchar_t* param) { action = #name; argument = param ? param : L""; }
+FAKE_ACTION(HandleReloadDriverCommand)
+FAKE_ACTION(HandleHdrPlusCommand)
+FAKE_ACTION(HandleSdr10Command)
+FAKE_ACTION(HandleCustomEdidCommand)
+FAKE_ACTION(HandlePreventSpoofCommand)
+FAKE_ACTION(HandleCeaOverrideCommand)
+FAKE_ACTION(HandleEdidProfileCommand)
+FAKE_ACTION(HandleVrrCommand)
+FAKE_ACTION(HandleHardwareCursorCommand)
+FAKE_ACTION(HandleD3DDeviceGpuCommand)
+FAKE_ACTION(HandleIddCxVersionCommand)
+FAKE_ACTION(HandleGetAssignedGpuCommand)
+FAKE_ACTION(HandleGetAllGpusCommand)
+FAKE_ACTION(HandleSetGpuCommand)
+FAKE_ACTION(HandleSetDisplayCountCommand)
+FAKE_ACTION(HandleCreateMonitorCommand)
+FAKE_ACTION(HandleDestroyMonitorCommand)
+FAKE_ACTION(HandleRefreshModesCommand)
+FAKE_ACTION(HandleSetModesCommand)
+FAKE_ACTION(HandleUnknownCommand)
+#undef FAKE_ACTION
 
 void Check(bool ok, const char* message)
 {
@@ -80,6 +107,19 @@ bool Transform(const std::string& xml, const wchar_t* target, const wchar_t* val
 
 int main()
 {
+    for (const auto* bad : {L"RELOAD_DRIVERjunk", L"DESTROYMONITORx", L"HDRPLUStrue", L""})
+    {
+        std::wstring command(bad);
+        DispatchVddCommandBuffer(command.data());
+        Check(action == "HandleUnknownCommand", "command prefix accepted as action");
+    }
+    DispatchVddCommandBuffer(nullptr);
+    std::wstring command = L"HDRPLUS true";
+    DispatchVddCommandBuffer(command.data());
+    Check(action == "HandleHdrPlusCommand" && argument == L"true", "valid command dispatch");
+    command = L"RELOAD_DRIVER";
+    DispatchVddCommandBuffer(command.data());
+    Check(action == "HandleReloadDriverCommand" && argument.empty(), "parameterless command");
     VddSettings::DisplaySettings saved;
     auto reader = Reader(valid);
     Check(VddSettings::ReadDisplaySettings(reader, saved), "valid configuration rejected");
@@ -91,6 +131,7 @@ int main()
         Replace(valid, "<count>2</count>", "<count>-1</count>"),
         Replace(valid, "<count>2</count>", "<count>17</count>"),
         Replace(valid, "<count>2</count>", "<count>2junk</count>"),
+        Replace(valid, "<count>2</count>", "<count> </count>"),
         Replace(valid, "<width>2868</width>", "<width>0</width>"),
         Replace(valid, "<height>1320</height>", "<height/>"),
         Replace(valid, "59.94", "nan"), Replace(valid, "59.94", "inf"),

@@ -13,6 +13,7 @@ struct Command
 
 void DispatchVddCommandBuffer(wchar_t *buffer)
 {
+	if (!buffer) return;
 	Command commands[] = {
 		{L"RELOAD_DRIVER", 13, HandleReloadDriverCommand},
 		{L"HDRPLUS", 7, HandleHdrPlusCommand},
@@ -37,7 +38,8 @@ void DispatchVddCommandBuffer(wchar_t *buffer)
 
 	for (const auto &cmd : commands)
 	{
-		if (wcsncmp(buffer, cmd.name, cmd.length) == 0)
+		if (wcsncmp(buffer, cmd.name, cmd.length) == 0 &&
+			(buffer[cmd.length] == L'\0' || buffer[cmd.length] == L' '))
 		{
 			wchar_t *param = buffer + cmd.length;
 			if (*param == L' ')
