@@ -55,7 +55,10 @@ jobs:
             platform = 'x64'
             signing = 'Off; experimental outputs only'
           } | ConvertTo-Json | Set-Content evidence/source.json
-          git -C source status --porcelain --untracked-files=no | Set-Content evidence/source-before.txt
+          $before = @(git -C source status --porcelain --untracked-files=no)
+          if ($LASTEXITCODE -ne 0) { throw 'Initial source status failed' }
+          [IO.File]::WriteAllText((Join-Path $PWD 'evidence/source-before.txt'), ($before -join "`n"))
+          if ($before.Count -gt 0) { throw 'Official source checkout is dirty before build' }
 
       - name: Setup VS2022 MSBuild
         uses: microsoft/setup-msbuild@6fb02220983dee41ce7ae257b6f4d8f9bf5ed4ce # v2
@@ -83,6 +86,18 @@ jobs:
           & cmd /d /c 'call tools\edid_test\build_consumer.bat' 2>&1 | Tee-Object ../evidence/edid-test.log
           exit $LASTEXITCODE
 
+      # WDK tasks may log an error while MSBuild still returns zero. Preserve
+      # successful DLL/EDID evidence, but do not label that run fully verified.
+      - name: Require clean MSBuild error summary
+        shell: pwsh
+        run: |
+          $log = 'evidence/vdd-build.log'
+          if (-not (Test-Path $log)) { throw 'MSBuild log missing' }
+          $summary = @(Select-String -Path $log -Pattern '^\s*\d+ Error\(s\)\s*$')
+          if ($summary.Count -ne 1 -or $summary[0].Line.Trim() -ne '0 Error(s)') {
+            throw 'MSBuild did not report zero errors; inspect vdd-build.log even if its exit code was zero'
+          }
+
       - name: Preserve output hashes and final source integrity
         if: always()
         shell: pwsh
@@ -93,7 +108,9 @@ jobs:
           $changes = @(git -C source status --porcelain --untracked-files=no)
           if ($LASTEXITCODE -ne 0) { throw 'Source status failed' }
           [IO.File]::WriteAllText((Join-Path $PWD 'evidence/source-after.txt'), ($changes -join "`n"))
-          git -C source diff --binary HEAD | Set-Content evidence/source.diff
+          $diff = @(git -C source diff --binary HEAD)
+          if ($LASTEXITCODE -ne 0) { throw 'Source diff failed' }
+          [IO.File]::WriteAllText((Join-Path $PWD 'evidence/source.diff'), ($diff -join "`n"))
           $outputs = @(Get-ChildItem source/x64/Release/ZakoVDD -File -ErrorAction SilentlyContinue)
           $outputs | ForEach-Object {
             [ordered]@{ path = $_.Name; bytes = $_.Length; sha256 = (Get-FileHash $_.FullName -Algorithm SHA256).Hash }
